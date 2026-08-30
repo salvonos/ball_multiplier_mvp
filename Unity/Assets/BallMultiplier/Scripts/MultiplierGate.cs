@@ -10,7 +10,6 @@ public class MultiplierGate : MonoBehaviour
     [Header("Ball")]
     [SerializeField] private Ball ballPrefab;
     [SerializeField] private float cloneGap = 0.02f;
-    [SerializeField] private float gateImmunitySeconds = 0.20f;
 
     private BoxCollider2D triggerCollider;
     private int gateId;
@@ -20,10 +19,6 @@ public class MultiplierGate : MonoBehaviour
     {
         triggerCollider = GetComponent<BoxCollider2D>();
         triggerCollider.isTrigger = true;
-
-        // Do not use GetInstanceID/GetEntityId here.
-        // A simple runtime counter is enough to uniquely identify gates
-        // for the short immunity window used by Ball.
         gateId = nextGateId++;
     }
 
@@ -48,6 +43,8 @@ public class MultiplierGate : MonoBehaviour
 
     private void Multiply(Ball sourceBall)
     {
+        sourceBall.MarkGateUsed(gateId);
+
         Vector2 velocity = sourceBall.Body.linearVelocity;
         Vector2 sourcePosition = sourceBall.transform.position;
 
@@ -58,11 +55,9 @@ public class MultiplierGate : MonoBehaviour
             ? velocity.normalized
             : Vector2.down;
 
-        float exitDistance = GetGateHalfThicknessAlong(travelDirection) + diameter * 0.6f;
+        float exitDistance = GetGateHalfThicknessAlong(travelDirection) + diameter * 0.75f;
         Vector2 spawnCenter = sourcePosition + travelDirection * exitDistance;
         Vector2 spreadAxis = new Vector2(-travelDirection.y, travelDirection.x).normalized;
-
-        Destroy(sourceBall.gameObject);
 
         for (int i = 0; i < multiplier; i++)
         {
@@ -70,9 +65,11 @@ public class MultiplierGate : MonoBehaviour
             Vector2 spawnPosition = spawnCenter + spreadAxis * offset;
 
             Ball clone = Instantiate(ballPrefab, spawnPosition, Quaternion.identity);
-            clone.MarkGateUsed(gateId, gateImmunitySeconds);
+            clone.CopyUsedGatesFrom(sourceBall);
             clone.Body.linearVelocity = velocity;
         }
+
+        Destroy(sourceBall.gameObject);
     }
 
     private float GetBallDiameter()
