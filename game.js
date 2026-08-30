@@ -126,7 +126,6 @@ function createLevel() {
   addStaticRect(wall / 2, H / 2, wall, H, 0, "wall");
   addStaticRect(W - wall / 2, H / 2, wall, H, 0, "wall");
 
-  // First two ramps removed: the player now chooses the starting path directly.
   addGate(W * 0.22, H * 0.34, W * 0.34, 42, 2);
   addGate(W * 0.73, H * 0.34, W * 0.42, 42, 3);
 
@@ -152,11 +151,12 @@ function createLevel() {
 }
 
 function addGate(x, y, w, h, multiplier) {
-  addStaticRect(x, y - h / 2 + 4, w, 8);
+  // The coloured multiplier area is a sensor, not a solid platform.
+  // Only the small side rails are physical, so balls can fall through it.
   addStaticRect(x - w / 2, y, 8, h);
   addStaticRect(x + w / 2, y, 8, h);
 
-  const sensor = addSensorRect(x, y + 2, w - 16, h - 12, "gate", { multiplier });
+  const sensor = addSensorRect(x, y, w - 16, h, "gate", { multiplier });
   sensor.renderData = { x, y, w, h, multiplier };
 }
 
