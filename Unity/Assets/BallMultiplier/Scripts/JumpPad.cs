@@ -6,8 +6,6 @@ public class JumpPad : MonoBehaviour
 {
     [Header("Jump")]
     [SerializeField] private float jumpVelocity = 12f;
-    [Tooltip("If horizontal speed is almost zero, add a small sideways push so balls do not bounce forever in a vertical loop.")]
-    [SerializeField] private float minimumHorizontalExitSpeed = 1.25f;
 
     [Header("Behaviour")]
     [Tooltip("A ball can use this specific Jump Pad only once.")]
@@ -58,24 +56,13 @@ public class JumpPad : MonoBehaviour
         if (oneUsePerBall)
             usedBalls.Add(ball);
 
-        Vector2 velocity = ball.Body.linearVelocity;
+        // The pad launches along its own local +Y axis.
+        // Rotating the JumpPad therefore rotates the launch direction too.
+        Vector2 launchDirection = ((Vector2)transform.up).normalized;
 
-        // Always launch upward.
-        velocity.y = Mathf.Abs(jumpVelocity);
-
-        // Avoid a perfectly vertical endless loop. If the ball has almost no
-        // X velocity, push it away from the pad centre. If it is exactly centred,
-        // choose a deterministic side from its current relative position.
-        if (Mathf.Abs(velocity.x) < minimumHorizontalExitSpeed)
-        {
-            float side = Mathf.Sign(ball.transform.position.x - transform.position.x);
-            if (Mathf.Approximately(side, 0f))
-                side = 1f;
-
-            velocity.x = side * Mathf.Abs(minimumHorizontalExitSpeed);
-        }
-
-        ball.Body.linearVelocity = velocity;
+        // Replace the current velocity with a clean launch along the pad normal.
+        // This makes the behaviour consistent and physically aligned with the pad orientation.
+        ball.Body.linearVelocity = launchDirection * Mathf.Abs(jumpVelocity);
     }
 
     private void FitColliderToSprite()
