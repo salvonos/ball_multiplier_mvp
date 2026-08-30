@@ -12,10 +12,8 @@ public class BallSpawner : MonoBehaviour
     [Header("Camera Anchoring")]
     [SerializeField] private Camera worldCamera;
     [Range(0.01f, 0.25f)]
-    [Tooltip("Screen-space distance from the top edge. 0.06 = 6% below the top.")]
     [SerializeField] private float topViewportPadding = 0.06f;
     [Range(0.01f, 0.25f)]
-    [Tooltip("Screen-space distance from the left/right edges.")]
     [SerializeField] private float sideViewportPadding = 0.03f;
 
     [Header("Drag")]
@@ -31,7 +29,6 @@ public class BallSpawner : MonoBehaviour
     private bool dragging;
     private bool readyToDrop = true;
     private readonly List<Ball> spawnedBalls = new List<Ball>();
-
     private LineRenderer guideLine;
     private Material guideMaterial;
 
@@ -40,12 +37,19 @@ public class BallSpawner : MonoBehaviour
 
     private void Awake()
     {
-        if (worldCamera == null)
-            worldCamera = Camera.main;
-
+        ResolveCamera();
         CreateGuideLine();
-        SnapToCameraTop();
-        UpdateGuideLine();
+        ForceAnchorNow();
+    }
+
+    private void Start()
+    {
+        ForceAnchorNow();
+    }
+
+    private void OnEnable()
+    {
+        ResolveCamera();
     }
 
     private void OnDestroy()
@@ -56,6 +60,13 @@ public class BallSpawner : MonoBehaviour
 
     private void Update()
     {
+        ResolveCamera();
+
+        // IMPORTANT: always keep the transform anchored to the camera,
+        // even while Play mode hides the guide. This means changing the
+        // camera zoom can never leave the launcher at its old world Y.
+        SnapToCameraTop();
+
         bool editMode = GameModeController.Instance == null ||
                         GameModeController.Instance.Mode == GameMode.Edit;
 
@@ -66,10 +77,28 @@ public class BallSpawner : MonoBehaviour
             return;
         }
 
-        SnapToCameraTop();
         SetGuideVisible(true);
         UpdateGuideLine();
         HandlePointer();
+    }
+
+    private void LateUpdate()
+    {
+        // Re-apply after all camera scripts have updated this frame.
+        SnapToCameraTop();
+    }
+
+    private void ResolveCamera()
+    {
+        if (worldCamera == null)
+            worldCamera = Camera.main;
+    }
+
+    private void ForceAnchorNow()
+    {
+        SnapToCameraTop();
+        UpdateGuideLine();
+        SetGuideVisible(readyToDrop);
     }
 
     private float ZoomScale()
@@ -80,33 +109,26 @@ public class BallSpawner : MonoBehaviour
         return worldCamera.orthographicSize / Mathf.Max(0.01f, referenceOrthographicSize);
     }
 
-    private Vector3 ViewportToWorld(float x, float y)
-    {
-        float distance = Mathf.Abs(worldCamera.transform.position.z);
-        Vector3 world = worldCamera.ViewportToWorldPoint(new Vector3(x, y, distance));
-        world.z = 0f;
-        return world;
-    }
-
     private void SnapToCameraTop()
     {
         if (worldCamera == null || !worldCamera.orthographic)
             return;
 
-        float viewportY = 1f - Mathf.Clamp(topViewportPadding, 0.01f, 0.25f);
-        float targetY = ViewportToWorld(0.5f, viewportY).y;
+        float halfHeight = worldCamera.orthographicSize;
+        float halfWidth = halfHeight * worldCamera.aspect;
+
+        // Viewport based vertical anchor: 0.06 means 6% below screen top.
+        float verticalInset = halfHeight * 2f * Mathf.Clamp(topViewportPadding, 0.01f, 0.25f);
+        float targetY = worldCamera.transform.position.y + halfHeight - verticalInset;
 
         float occupiedHalfWidth = GetOccupiedHalfWidth();
-        float leftWorld = ViewportToWorld(Mathf.Clamp(sideViewportPadding, 0.01f, 0.25f), 0.5f).x;
-        float rightWorld = ViewportToWorld(1f - Mathf.Clamp(sideViewportPadding, 0.01f, 0.25f), 0.5f).x;
+        float horizontalInset = halfWidth * 2f * Mathf.Clamp(sideViewportPadding, 0.01f, 0.25f);
+        float allowedHalfWidth = Mathf.Max(0f, halfWidth - horizontalInset - occupiedHalfWidth);
 
-        float minX = leftWorld + occupiedHalfWidth;
-        float maxX = rightWorld - occupiedHalfWidth;
-        float clampedX = minX <= maxX
-            ? Mathf.Clamp(transform.position.x, minX, maxX)
-            : worldCamera.transform.position.x;
+        float centerX = worldCamera.transform.position.x;
+        float targetX = Mathf.Clamp(transform.position.x, centerX - allowedHalfWidth, centerX + allowedHalfWidth);
 
-        transform.position = new Vector3(clampedX, targetY, 0f);
+        transform.position = new Vector3(targetX, targetY, 0f);
     }
 
     private void HandlePointer()
@@ -122,17 +144,18 @@ public class BallSpawner : MonoBehaviour
 
         if (dragging && Pointer.current.press.isPressed)
         {
+            float halfWidth = worldCamera.orthographicSize * worldCamera.aspect;
             float occupiedHalfWidth = GetOccupiedHalfWidth();
-            float leftWorld = ViewportToWorld(Mathf.Clamp(sideViewportPadding, 0.01f, 0.25f), 0.5f).x;
-            float rightWorld = ViewportToWorld(1f - Mathf.Clamp(sideViewportPadding, 0.01f, 0.25f), 0.5f).x;
-            float minX = leftWorld + occupiedHalfWidth;
-            float maxX = rightWorld - occupiedHalfWidth;
+            float horizontalInset = halfWidth * 2f * Mathf.Clamp(sideViewportPadding, 0.01f, 0.25f);
+            float allowedHalfWidth = Mathf.Max(0f, halfWidth - horizontalInset - occupiedHalfWidth);
+            float centerX = worldCamera.transform.position.x;
 
-            float x = minX <= maxX
-                ? Mathf.Clamp(worldPosition.x, minX, maxX)
-                : worldCamera.transform.position.x;
+            transform.position = new Vector3(
+                Mathf.Clamp(worldPosition.x, centerX - allowedHalfWidth, centerX + allowedHalfWidth),
+                transform.position.y,
+                0f
+            );
 
-            transform.position = new Vector3(x, transform.position.y, 0f);
             UpdateGuideLine();
         }
 
@@ -146,10 +169,7 @@ public class BallSpawner : MonoBehaviour
     private Vector3 ScreenToWorld(Vector2 screenPosition)
     {
         float distance = Mathf.Abs(worldCamera.transform.position.z);
-        Vector3 worldPosition = worldCamera.ScreenToWorldPoint(
-            new Vector3(screenPosition.x, screenPosition.y, distance)
-        );
-
+        Vector3 worldPosition = worldCamera.ScreenToWorldPoint(new Vector3(screenPosition.x, screenPosition.y, distance));
         worldPosition.z = 0f;
         return worldPosition;
     }
@@ -161,11 +181,9 @@ public class BallSpawner : MonoBehaviour
         float verticalTolerance = clickVerticalToleranceAtSize9 * zoom;
         float horizontalPadding = clickHorizontalPaddingAtSize9 * zoom;
 
-        bool insideY = Mathf.Abs(worldPosition.y - transform.position.y) <= verticalTolerance;
-        bool insideX = worldPosition.x >= transform.position.x - halfWidth - horizontalPadding &&
-                       worldPosition.x <= transform.position.x + halfWidth + horizontalPadding;
-
-        return insideX && insideY;
+        return Mathf.Abs(worldPosition.y - transform.position.y) <= verticalTolerance &&
+               worldPosition.x >= transform.position.x - halfWidth - horizontalPadding &&
+               worldPosition.x <= transform.position.x + halfWidth + horizontalPadding;
     }
 
     private float GetBallVisualRadius()
@@ -175,18 +193,11 @@ public class BallSpawner : MonoBehaviour
 
         SpriteRenderer spriteRenderer = ballPrefab.GetComponent<SpriteRenderer>();
         if (spriteRenderer != null && spriteRenderer.sprite != null)
-        {
-            float width = spriteRenderer.sprite.bounds.size.x;
-            float scale = Mathf.Abs(ballPrefab.transform.localScale.x);
-            return width * scale * 0.5f;
-        }
+            return spriteRenderer.sprite.bounds.size.x * Mathf.Abs(ballPrefab.transform.localScale.x) * 0.5f;
 
         CircleCollider2D circle = ballPrefab.GetComponent<CircleCollider2D>();
         if (circle != null)
-        {
-            float scale = Mathf.Abs(ballPrefab.transform.localScale.x);
-            return circle.radius * scale;
-        }
+            return circle.radius * Mathf.Abs(ballPrefab.transform.localScale.x);
 
         return 0.5f;
     }
@@ -275,13 +286,7 @@ public class BallSpawner : MonoBehaviour
         for (int i = 0; i < initialBallCount; i++)
         {
             float offset = (i - (initialBallCount - 1) * 0.5f) * spacing;
-
-            Ball newBall = Instantiate(
-                ballPrefab,
-                new Vector3(transform.position.x + offset, spawnY, 0f),
-                Quaternion.identity
-            );
-
+            Ball newBall = Instantiate(ballPrefab, new Vector3(transform.position.x + offset, spawnY, 0f), Quaternion.identity);
             spawnedBalls.Add(newBall);
         }
     }
@@ -291,9 +296,7 @@ public class BallSpawner : MonoBehaviour
         ClearBalls();
         readyToDrop = true;
         dragging = false;
-        SnapToCameraTop();
-        SetGuideVisible(true);
-        UpdateGuideLine();
+        ForceAnchorNow();
     }
 
     public void ClearBalls()
