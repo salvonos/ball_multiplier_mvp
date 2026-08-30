@@ -10,6 +10,8 @@ public class MultiplierGate : MonoBehaviour
     [Header("Ball")]
     [SerializeField] private Ball ballPrefab;
     [SerializeField] private float cloneGap = 0.02f;
+    [Tooltip("Prevents immediate re-trigger while clones are still leaving this same gate. The gate can be used again after this time.")]
+    [SerializeField] private float sameGateCooldown = 0.35f;
 
     private BoxCollider2D triggerCollider;
     private int gateId;
@@ -69,7 +71,7 @@ public class MultiplierGate : MonoBehaviour
 
     private void Multiply(Ball sourceBall)
     {
-        sourceBall.MarkGateUsed(gateId);
+        sourceBall.BlockGateTemporarily(gateId, sameGateCooldown);
 
         Vector2 velocity = sourceBall.Body.linearVelocity;
         Vector2 sourcePosition = sourceBall.transform.position;
@@ -91,7 +93,7 @@ public class MultiplierGate : MonoBehaviour
             Vector2 spawnPosition = spawnCenter + spreadAxis * offset;
 
             Ball clone = Instantiate(ballPrefab, spawnPosition, Quaternion.identity);
-            clone.CopyUsedGatesFrom(sourceBall);
+            clone.CopyGateCooldownsFrom(sourceBall);
             clone.Body.linearVelocity = velocity;
         }
 
