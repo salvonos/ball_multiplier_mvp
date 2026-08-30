@@ -7,7 +7,6 @@ public class BallSpawner : MonoBehaviour
     [Header("Spawn")]
     [SerializeField] private Ball ballPrefab;
     [SerializeField] private int initialBallCount = 5;
-    [Tooltip("Extra visual gap between balls. 0 = balls touch exactly.")]
     [SerializeField] private float ballGap = 0f;
 
     [Header("Horizontal Drag")]
@@ -24,7 +23,7 @@ public class BallSpawner : MonoBehaviour
 
     private bool dragging;
     private bool readyToDrop = true;
-    private readonly List<Ball> spawnedBalls = new();
+    private readonly List<Ball> spawnedBalls = new List<Ball>();
 
     private LineRenderer guideLine;
     private Material guideMaterial;
@@ -70,15 +69,15 @@ public class BallSpawner : MonoBehaviour
             return;
 
         Vector2 screenPosition = Pointer.current.position.ReadValue();
-        Vector3 world = ScreenToWorld(screenPosition);
+        Vector3 worldPosition = ScreenToWorld(screenPosition);
 
-        if (Pointer.current.press.wasPressedThisFrame && PointerHitsGuide(world))
+        if (Pointer.current.press.wasPressedThisFrame && PointerHitsGuide(worldPosition))
             dragging = true;
 
         if (dragging && Pointer.current.press.isPressed)
         {
             transform.position = new Vector3(
-                Mathf.Clamp(world.x, minX, maxX),
+                Mathf.Clamp(worldPosition.x, minX, maxX),
                 transform.position.y,
                 0f
             );
@@ -95,47 +94,44 @@ public class BallSpawner : MonoBehaviour
 
     private Vector3 ScreenToWorld(Vector2 screenPosition)
     {
-        Vector3 world = worldCamera.ScreenToWorldPoint(
-            new Vector3(
-                screenPosition.x,
-                screenPosition.y,
-                -worldCamera.transform.position.z
-            )
+        float distance = Mathf.Abs(worldCamera.transform.position.z);
+        Vector3 worldPosition = worldCamera.ScreenToWorldPoint(
+            new Vector3(screenPosition.x, screenPosition.y, distance)
         );
 
-        world.z = 0f;
-        return world;
+        worldPosition.z = 0f;
+        return worldPosition;
     }
 
     private bool PointerHitsGuide(Vector3 worldPosition)
     {
         float halfWidth = GetOccupiedHalfWidth();
 
-        return Mathf.Abs(worldPosition.y - transform.position.y) <= clickVerticalTolerance &&
-               worldPosition.x >= transform.position.x - halfWidth - clickHorizontalPadding &&
-               worldPosition.x <= transform.position.x + halfWidth + clickHorizontalPadding;
+        bool insideY = Mathf.Abs(worldPosition.y - transform.position.y) <= clickVerticalTolerance;
+        bool insideX = worldPosition.x >= transform.position.x - halfWidth - clickHorizontalPadding &&
+                       worldPosition.x <= transform.position.x + halfWidth + clickHorizontalPadding;
+
+        return insideX && insideY;
     }
 
-    // IMPORTANT: the guide represents what the player SEES, so its size is
-    // calculated from the SpriteRenderer first, not from the physics collider.
     private float GetBallVisualRadius()
     {
         if (ballPrefab == null)
             return 0.5f;
 
-        SpriteRenderer sprite = ballPrefab.GetComponent<SpriteRenderer>();
-        if (sprite != null && sprite.sprite != null)
+        SpriteRenderer spriteRenderer = ballPrefab.GetComponent<SpriteRenderer>();
+        if (spriteRenderer != null && spriteRenderer.sprite != null)
         {
-            float spriteWidth = sprite.sprite.bounds.size.x;
-            float scaleX = Mathf.Abs(ballPrefab.transform.localScale.x);
-            return spriteWidth * scaleX * 0.5f;
+            float width = spriteRenderer.sprite.bounds.size.x;
+            float scale = Mathf.Abs(ballPrefab.transform.localScale.x);
+            return width * scale * 0.5f;
         }
 
         CircleCollider2D circle = ballPrefab.GetComponent<CircleCollider2D>();
         if (circle != null)
         {
-            float scaleX = Mathf.Abs(ballPrefab.transform.localScale.x);
-            return circle.radius * scaleX;
+            float scale = Mathf.Abs(ballPrefab.transform.localScale.x);
+            return circle.radius * scale;
         }
 
         return 0.5f;
@@ -149,8 +145,7 @@ public class BallSpawner : MonoBehaviour
     private float GetOccupiedHalfWidth()
     {
         float radius = GetBallVisualRadius();
-        float centerSpacing = GetCenterSpacing();
-        float centersWidth = Mathf.Max(0, initialBallCount - 1) * centerSpacing;
+        float centersWidth = Mathf.Max(0, initialBallCount - 1) * GetCenterSpacing();
         return centersWidth * 0.5f + radius;
     }
 
@@ -219,24 +214,21 @@ public class BallSpawner : MonoBehaviour
     {
         ClearBalls();
 
-        float visualRadius = GetBallVisualRadius();
-        float centerSpacing = GetCenterSpacing();
-
-        // The guide is the TOP edge of the row. Each ball starts exactly below it.
-        float spawnY = transform.position.y - visualRadius;
+        float radius = GetBallVisualRadius();
+        float spacing = GetCenterSpacing();
+        float spawnY = transform.position.y - radius;
 
         for (int i = 0; i < initialBallCount; i++)
         {
-            float offset =
-                (i - (initialBallCount - 1) * 0.5f) * centerSpacing;
+            float offset = (i - (initialBallCount - 1) * 0.5f) * spacing;
 
-            Ball ball = Instantiate(
+            Ball newBall = Instantiate(
                 ballPrefab,
                 new Vector3(transform.position.x + offset, spawnY, 0f),
                 Quaternion.identity
             );
 
-            spawnedBalls.Add(ball);
+            spawnedBalls.Add(newBall);
         }
     }
 
