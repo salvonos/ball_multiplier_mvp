@@ -19,14 +19,40 @@ public class MultiplierGate : MonoBehaviour
     {
         triggerCollider = GetComponent<BoxCollider2D>();
         triggerCollider.isTrigger = true;
+        SyncColliderToVisibleSprite();
         gateId = nextGateId++;
     }
 
     private void Reset()
     {
+        triggerCollider = GetComponent<BoxCollider2D>();
+        triggerCollider.isTrigger = true;
+        SyncColliderToVisibleSprite();
+    }
+
+    private void OnValidate()
+    {
         BoxCollider2D box = GetComponent<BoxCollider2D>();
+        if (box == null)
+            return;
+
         box.isTrigger = true;
-        box.size = new Vector2(3f, 0.45f);
+        triggerCollider = box;
+        SyncColliderToVisibleSprite();
+    }
+
+    private void SyncColliderToVisibleSprite()
+    {
+        if (triggerCollider == null)
+            triggerCollider = GetComponent<BoxCollider2D>();
+
+        SpriteRenderer spriteRenderer = GetComponent<SpriteRenderer>();
+        if (triggerCollider == null || spriteRenderer == null || spriteRenderer.sprite == null)
+            return;
+
+        Bounds bounds = spriteRenderer.sprite.bounds;
+        triggerCollider.size = bounds.size;
+        triggerCollider.offset = bounds.center;
     }
 
     private void OnTriggerEnter2D(Collider2D other)
