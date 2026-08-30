@@ -19,7 +19,7 @@ public class MultiplierGate : MonoBehaviour
     {
         triggerCollider = GetComponent<BoxCollider2D>();
         triggerCollider.isTrigger = true;
-        gateId = GetInstanceID();
+        gateId = unchecked((int)GetEntityId());
     }
 
     private void Reset()
@@ -49,15 +49,12 @@ public class MultiplierGate : MonoBehaviour
         float diameter = GetBallDiameter();
         float spacing = diameter + Mathf.Max(0f, cloneGap);
 
-        // Spawn just beyond the trigger in the current direction of travel.
         Vector2 travelDirection = velocity.sqrMagnitude > 0.001f
             ? velocity.normalized
             : Vector2.down;
 
         float exitDistance = GetGateHalfThicknessAlong(travelDirection) + diameter * 0.6f;
         Vector2 spawnCenter = sourcePosition + travelDirection * exitDistance;
-
-        // Spread clones perpendicular to the travel direction.
         Vector2 spreadAxis = new Vector2(-travelDirection.y, travelDirection.x).normalized;
 
         Destroy(sourceBall.gameObject);
