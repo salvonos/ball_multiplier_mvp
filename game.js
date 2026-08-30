@@ -20,8 +20,14 @@ let dropped = false;
 let raf = null;
 let lastTime = performance.now();
 
+let launcherX = 210;
+let draggingLauncher = false;
+
 const BALL_R = 7;
+const INITIAL_BALLS = 5;
 const MAX_BALLS = 500;
+const LAUNCH_Y = 58;
+const LAUNCH_SPACING = 18;
 
 const COLORS = {
   bg1: "#161e33",
@@ -50,6 +56,17 @@ function resizeCanvas() {
 
   W = rect.width;
   H = rect.height;
+  launcherX = clampLauncherX(launcherX || W / 2);
+}
+
+function clampLauncherX(x) {
+  const groupHalfWidth = ((INITIAL_BALLS - 1) * LAUNCH_SPACING) / 2 + BALL_R + 12;
+  return Math.max(groupHalfWidth + 18, Math.min(W - groupHalfWidth - 18, x));
+}
+
+function pointerX(event) {
+  const rect = canvas.getBoundingClientRect();
+  return event.clientX - rect.left;
 }
 
 function addStaticRect(x, y, w, h, angle = 0, label = "wall", extra = {}) {
@@ -109,9 +126,7 @@ function createLevel() {
   addStaticRect(wall / 2, H / 2, wall, H, 0, "wall");
   addStaticRect(W - wall / 2, H / 2, wall, H, 0, "wall");
 
-  addStaticRect(W * 0.21, H * 0.27, W * 0.34, 12, -0.18);
-  addStaticRect(W * 0.79, H * 0.27, W * 0.34, 12, 0.18);
-
+  // First two ramps removed: the player now chooses the starting path directly.
   addGate(W * 0.22, H * 0.34, W * 0.34, 42, 2);
   addGate(W * 0.73, H * 0.34, W * 0.42, 42, 3);
 
@@ -203,6 +218,9 @@ function setup() {
   if (raf) cancelAnimationFrame(raf);
 
   resizeCanvas();
+  launcherX = W / 2;
+  draggingLauncher = false;
+
   engine = Engine.create({
     gravity: { x: 0, y: 1, scale: 0.00135 }
   });
@@ -211,7 +229,7 @@ function setup() {
   collected = 0;
   dropped = false;
   collectedEl.textContent = "0";
-  statusEl.textContent = "Ready";
+  statusEl.textContent = "Drag balls left or right";
   dropBtn.disabled = false;
   dropBtn.style.display = "block";
   dropBtn.textContent = "DROP 5 BALLS";
@@ -228,18 +246,23 @@ function setup() {
 function dropInitialBalls() {
   if (dropped) return;
   dropped = true;
+  draggingLauncher = false;
   dropBtn.disabled = true;
   dropBtn.style.display = "none";
   statusEl.textContent = "Running";
 
-  const center = W / 2;
-  for (let i = 0; i < 5; i++) {
-    createBall(center + (i - 2) * 18, 44, (i - 2) * 0.05, 0);
+  for (let i = 0; i < INITIAL_BALLS; i++) {
+    createBall(
+      launcherX + (i - (INITIAL_BALLS - 1) / 2) * LAUNCH_SPACING,
+      LAUNCH_Y,
+      (i - (INITIAL_BALLS - 1) / 2) * 0.05,
+      0
+    );
   }
 }
 
 function updateHud() {
-  ballCountEl.textContent = balls.size;
+  ballCountEl.textContent = dropped ? balls.size : INITIAL_BALLS;
 
   if (dropped && balls.size === 0) {
     statusEl.textContent = `Finished — ${collected} collected`;
@@ -251,6 +274,38 @@ function drawRoundedRect(x, y, w, h, r, fill) {
   ctx.roundRect(x, y, w, h, r);
   ctx.fillStyle = fill;
   ctx.fill();
+}
+
+function drawLauncher() {
+  if (dropped) return;
+
+  ctx.save();
+  ctx.setLineDash([5, 7]);
+  ctx.strokeStyle = "rgba(255,255,255,.16)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(launcherX, LAUNCH_Y + 15);
+  ctx.lineTo(launcherX, H * 0.30);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  for (let i = 0; i < INITIAL_BALLS; i++) {
+    const x = launcherX + (i - (INITIAL_BALLS - 1) / 2) * LAUNCH_SPACING;
+    ctx.beginPath();
+    ctx.arc(x, LAUNCH_Y, BALL_R, 0, Math.PI * 2);
+    ctx.fillStyle = COLORS.ball;
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = COLORS.outline;
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = "rgba(255,255,255,.62)";
+  ctx.font = "800 11px Arial";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("↔ DRAG TO AIM", launcherX, LAUNCH_Y + 28);
+  ctx.restore();
 }
 
 function draw() {
@@ -326,6 +381,8 @@ function draw() {
       ctx.fill();
     }
   }
+
+  drawLauncher();
 }
 
 function cleanOutOfBounds() {
@@ -348,6 +405,29 @@ function loop(now) {
   draw();
   raf = requestAnimationFrame(loop);
 }
+
+canvas.addEventListener("pointerdown", (event) => {
+  if (dropped) return;
+  draggingLauncher = true;
+  launcherX = clampLauncherX(pointerX(event));
+  canvas.setPointerCapture?.(event.pointerId);
+  event.preventDefault();
+});
+
+canvas.addEventListener("pointermove", (event) => {
+  if (dropped || !draggingLauncher) return;
+  launcherX = clampLauncherX(pointerX(event));
+  event.preventDefault();
+});
+
+function stopDragging(event) {
+  if (!draggingLauncher) return;
+  draggingLauncher = false;
+  canvas.releasePointerCapture?.(event.pointerId);
+}
+
+canvas.addEventListener("pointerup", stopDragging);
+canvas.addEventListener("pointercancel", stopDragging);
 
 dropBtn.addEventListener("click", dropInitialBalls);
 restartBtn.addEventListener("click", setup);
