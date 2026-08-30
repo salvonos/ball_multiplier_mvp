@@ -9,10 +9,14 @@ public class BallSpawner : MonoBehaviour
     [SerializeField] private int initialBallCount = 5;
     [SerializeField] private float ballGap = 0f;
 
-    [Header("Horizontal Drag")]
+    [Header("Camera Anchoring")]
     [SerializeField] private Camera worldCamera;
-    [SerializeField] private float minX = -7f;
-    [SerializeField] private float maxX = 7f;
+    [Tooltip("Distance from the visible top edge of the camera.")]
+    [SerializeField] private float topMargin = 0.8f;
+    [Tooltip("Distance from the visible left/right edges of the camera.")]
+    [SerializeField] private float sideMargin = 0.35f;
+
+    [Header("Drag")]
     [SerializeField] private float clickVerticalTolerance = 0.45f;
     [SerializeField] private float clickHorizontalPadding = 0.25f;
 
@@ -37,6 +41,7 @@ public class BallSpawner : MonoBehaviour
             worldCamera = Camera.main;
 
         CreateGuideLine();
+        SnapToCameraTop();
         UpdateGuideLine();
     }
 
@@ -58,9 +63,36 @@ public class BallSpawner : MonoBehaviour
             return;
         }
 
+        // Keep the launcher attached to the visible top edge even if
+        // Orthographic Size, aspect ratio or camera position changes.
+        SnapToCameraTop();
+
         SetGuideVisible(true);
         UpdateGuideLine();
         HandlePointer();
+    }
+
+    private void SnapToCameraTop()
+    {
+        if (worldCamera == null || !worldCamera.orthographic)
+            return;
+
+        float cameraTop = worldCamera.transform.position.y + worldCamera.orthographicSize;
+        float targetY = cameraTop - Mathf.Max(0f, topMargin);
+
+        float halfCameraWidth = worldCamera.orthographicSize * worldCamera.aspect;
+        float occupiedHalfWidth = GetOccupiedHalfWidth();
+        float horizontalLimit = Mathf.Max(
+            0f,
+            halfCameraWidth - occupiedHalfWidth - Mathf.Max(0f, sideMargin)
+        );
+
+        float cameraCenterX = worldCamera.transform.position.x;
+        float minX = cameraCenterX - horizontalLimit;
+        float maxX = cameraCenterX + horizontalLimit;
+        float clampedX = Mathf.Clamp(transform.position.x, minX, maxX);
+
+        transform.position = new Vector3(clampedX, targetY, 0f);
     }
 
     private void HandlePointer()
@@ -76,6 +108,17 @@ public class BallSpawner : MonoBehaviour
 
         if (dragging && Pointer.current.press.isPressed)
         {
+            float halfCameraWidth = worldCamera.orthographicSize * worldCamera.aspect;
+            float occupiedHalfWidth = GetOccupiedHalfWidth();
+            float horizontalLimit = Mathf.Max(
+                0f,
+                halfCameraWidth - occupiedHalfWidth - Mathf.Max(0f, sideMargin)
+            );
+
+            float cameraCenterX = worldCamera.transform.position.x;
+            float minX = cameraCenterX - horizontalLimit;
+            float maxX = cameraCenterX + horizontalLimit;
+
             transform.position = new Vector3(
                 Mathf.Clamp(worldPosition.x, minX, maxX),
                 transform.position.y,
@@ -237,6 +280,7 @@ public class BallSpawner : MonoBehaviour
         ClearBalls();
         readyToDrop = true;
         dragging = false;
+        SnapToCameraTop();
         SetGuideVisible(true);
         UpdateGuideLine();
     }
