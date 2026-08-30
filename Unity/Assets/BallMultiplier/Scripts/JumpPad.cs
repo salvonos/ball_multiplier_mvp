@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 [RequireComponent(typeof(BoxCollider2D))]
@@ -5,14 +6,19 @@ public class JumpPad : MonoBehaviour
 {
     [Header("Jump")]
     [SerializeField] private float jumpVelocity = 12f;
-    [Tooltip("Minimum time before the same ball can trigger this pad again.")]
-    [SerializeField] private float retriggerDelay = 0.15f;
+    [Tooltip("If horizontal speed is almost zero, add a small sideways push so balls do not bounce forever in a vertical loop.")]
+    [SerializeField] private float minimumHorizontalExitSpeed = 1.25f;
+
+    [Header("Behaviour")]
+    [Tooltip("A ball can use this specific Jump Pad only once.")]
+    [SerializeField] private bool oneUsePerBall = true;
 
     [Header("Collider")]
     [Tooltip("Automatically matches the BoxCollider2D to the visible sprite.")]
     [SerializeField] private bool fitColliderToSprite = true;
 
     private BoxCollider2D triggerCollider;
+    private readonly HashSet<Ball> usedBalls = new HashSet<Ball>();
 
     private void Awake()
     {
@@ -46,15 +52,29 @@ public class JumpPad : MonoBehaviour
         if (ball == null || ball.Body == null)
             return;
 
-        JumpPadBallState state = ball.GetComponent<JumpPadBallState>();
-        if (state == null)
-            state = ball.gameObject.AddComponent<JumpPadBallState>();
-
-        if (!state.CanTrigger(this, retriggerDelay))
+        if (oneUsePerBall && usedBalls.Contains(ball))
             return;
 
+        if (oneUsePerBall)
+            usedBalls.Add(ball);
+
         Vector2 velocity = ball.Body.linearVelocity;
+
+        // Always launch upward.
         velocity.y = Mathf.Abs(jumpVelocity);
+
+        // Avoid a perfectly vertical endless loop. If the ball has almost no
+        // X velocity, push it away from the pad centre. If it is exactly centred,
+        // choose a deterministic side from its current relative position.
+        if (Mathf.Abs(velocity.x) < minimumHorizontalExitSpeed)
+        {
+            float side = Mathf.Sign(ball.transform.position.x - transform.position.x);
+            if (Mathf.Approximately(side, 0f))
+                side = 1f;
+
+            velocity.x = side * Mathf.Abs(minimumHorizontalExitSpeed);
+        }
+
         ball.Body.linearVelocity = velocity;
     }
 
@@ -75,21 +95,5 @@ public class JumpPad : MonoBehaviour
         Bounds bounds = spriteRenderer.sprite.bounds;
         box.size = bounds.size;
         box.offset = bounds.center;
-    }
-}
-
-public class JumpPadBallState : MonoBehaviour
-{
-    private JumpPad lastPad;
-    private float lastTriggerTime = -999f;
-
-    public bool CanTrigger(JumpPad pad, float delay)
-    {
-        if (lastPad == pad && Time.time < lastTriggerTime + Mathf.Max(0f, delay))
-            return false;
-
-        lastPad = pad;
-        lastTriggerTime = Time.time;
-        return true;
     }
 }
