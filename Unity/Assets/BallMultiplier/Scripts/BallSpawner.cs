@@ -7,8 +7,8 @@ public class BallSpawner : MonoBehaviour
     [Header("Spawn")]
     [SerializeField] private Ball ballPrefab;
     [SerializeField] private int initialBallCount = 5;
-    [Tooltip("Extra gap between balls. 0 = balls touch exactly.")]
-    [SerializeField] private float ballGap = 0.02f;
+    [Tooltip("Extra visual gap between balls. 0 = balls touch exactly.")]
+    [SerializeField] private float ballGap = 0f;
 
     [Header("Horizontal Drag")]
     [SerializeField] private Camera worldCamera;
@@ -116,30 +116,39 @@ public class BallSpawner : MonoBehaviour
                worldPosition.x <= transform.position.x + halfWidth + clickHorizontalPadding;
     }
 
-    private float GetBallRadius()
+    // IMPORTANT: the guide represents what the player SEES, so its size is
+    // calculated from the SpriteRenderer first, not from the physics collider.
+    private float GetBallVisualRadius()
     {
         if (ballPrefab == null)
-            return 0.125f;
-
-        CircleCollider2D circle = ballPrefab.GetComponent<CircleCollider2D>();
-        if (circle != null)
-            return circle.radius * Mathf.Abs(ballPrefab.transform.localScale.x);
+            return 0.5f;
 
         SpriteRenderer sprite = ballPrefab.GetComponent<SpriteRenderer>();
         if (sprite != null && sprite.sprite != null)
-            return sprite.sprite.bounds.extents.x * Mathf.Abs(ballPrefab.transform.localScale.x);
+        {
+            float spriteWidth = sprite.sprite.bounds.size.x;
+            float scaleX = Mathf.Abs(ballPrefab.transform.localScale.x);
+            return spriteWidth * scaleX * 0.5f;
+        }
 
-        return 0.125f;
+        CircleCollider2D circle = ballPrefab.GetComponent<CircleCollider2D>();
+        if (circle != null)
+        {
+            float scaleX = Mathf.Abs(ballPrefab.transform.localScale.x);
+            return circle.radius * scaleX;
+        }
+
+        return 0.5f;
     }
 
     private float GetCenterSpacing()
     {
-        return GetBallRadius() * 2f + Mathf.Max(0f, ballGap);
+        return GetBallVisualRadius() * 2f + Mathf.Max(0f, ballGap);
     }
 
     private float GetOccupiedHalfWidth()
     {
-        float radius = GetBallRadius();
+        float radius = GetBallVisualRadius();
         float centerSpacing = GetCenterSpacing();
         float centersWidth = Mathf.Max(0, initialBallCount - 1) * centerSpacing;
         return centersWidth * 0.5f + radius;
@@ -183,7 +192,6 @@ public class BallSpawner : MonoBehaviour
         guideLine.startColor = guideColor;
         guideLine.endColor = guideColor;
 
-        // The horizontal line is the exact top edge of the ball row.
         guideLine.SetPosition(0, new Vector3(-halfWidth, halfCap, 0f));
         guideLine.SetPosition(1, new Vector3(-halfWidth, 0f, 0f));
         guideLine.SetPosition(2, new Vector3(halfWidth, 0f, 0f));
@@ -211,11 +219,11 @@ public class BallSpawner : MonoBehaviour
     {
         ClearBalls();
 
-        float radius = GetBallRadius();
+        float visualRadius = GetBallVisualRadius();
         float centerSpacing = GetCenterSpacing();
 
-        // Balls start immediately BELOW the guide, so visually they fall from the line.
-        float spawnY = transform.position.y - radius - guideWidth * 0.5f;
+        // The guide is the TOP edge of the row. Each ball starts exactly below it.
+        float spawnY = transform.position.y - visualRadius;
 
         for (int i = 0; i < initialBallCount; i++)
         {
