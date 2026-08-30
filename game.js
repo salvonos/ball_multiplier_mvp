@@ -1,262 +1,32 @@
 const { Engine, World, Bodies, Body, Events } = Matter;
-
-const canvas = document.getElementById("game");
-const wrap = document.getElementById("gameWrap");
-const dropBtn = document.getElementById("dropBtn");
-const restartBtn = document.getElementById("restartBtn");
-const ballCountEl = document.getElementById("ballCount");
-const collectedEl = document.getElementById("collected");
-const statusEl = document.getElementById("status");
-
-let engine, ctx;
-let W = 420, H = 720;
-let balls = new Set();
-let collected = 0;
-let dropped = false;
-let raf = null;
-let lastTime = performance.now();
-let launcherX = 210;
-let draggingLauncher = false;
-
-const BALL_R = 7;
-const INITIAL_BALLS = 5;
-const MAX_BALLS = 500;
-const LAUNCH_Y = 58;
-const LAUNCH_SPACING = 18;
-
-const COLORS = {
-  bg1: "#161e33", bg2: "#0a0e18", wall: "#3a4154", ball: "#ffffff",
-  outline: "#111826", gate2: "#f4aa24", gate3: "#7a5cff", gate5: "#69b929",
-  jump: "#24b8e7", bucket: "#222838", pin: "#65708a", text: "#ffffff"
-};
-
-function resizeCanvas() {
-  const rect = wrap.getBoundingClientRect();
-  const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-  canvas.width = Math.floor(rect.width * dpr);
-  canvas.height = Math.floor(rect.height * dpr);
-  canvas.style.width = rect.width + "px";
-  canvas.style.height = rect.height + "px";
-  ctx = canvas.getContext("2d");
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  W = rect.width; H = rect.height;
-  launcherX = clampLauncherX(launcherX || W / 2);
-}
-
-function clampLauncherX(x) {
-  const half = ((INITIAL_BALLS - 1) * LAUNCH_SPACING) / 2 + BALL_R + 12;
-  return Math.max(half + 18, Math.min(W - half - 18, x));
-}
-
-function pointerX(e) { return e.clientX - canvas.getBoundingClientRect().left; }
-
-function addStaticRect(x, y, w, h, angle = 0, label = "wall") {
-  const b = Bodies.rectangle(x, y, w, h, { isStatic: true, angle, label });
-  World.add(engine.world, b); return b;
-}
-
-function addSensorRect(x, y, w, h, label, data = {}) {
-  const b = Bodies.rectangle(x, y, w, h, { isStatic: true, isSensor: true, label });
-  Object.assign(b, data); World.add(engine.world, b); return b;
-}
-
-function createBall(x, y, vx = 0, vy = 0) {
-  if (balls.size >= MAX_BALLS) return null;
-  const ball = Bodies.circle(x, y, BALL_R, {
-    restitution: 0.35, friction: 0.005, frictionAir: 0.0015, density: 0.0018, label: "ball"
-  });
-  ball.plugin = { gateCooldown: 0, jumpCooldown: 0 };
-  Body.setVelocity(ball, { x: vx, y: vy });
-  balls.add(ball); World.add(engine.world, ball); updateHud(); return ball;
-}
-
-function removeBall(ball) {
-  if (!balls.has(ball)) return;
-  balls.delete(ball); World.remove(engine.world, ball); updateHud();
-}
-
-function createLevel() {
-  const wall = 18;
-  addStaticRect(wall / 2, H / 2, wall, H);
-  addStaticRect(W - wall / 2, H / 2, wall, H);
-
-  // Row 1: a clean choice. Nothing blocks the balls above or below the gates.
-  addGate(W * 0.25, H * 0.30, W * 0.38, 38, 2);
-  addGate(W * 0.75, H * 0.30, W * 0.38, 38, 3);
-
-  // Small Plinko section: enough variation without trapping balls.
-  const pins = [
-    [0.30, 0.42], [0.50, 0.42], [0.70, 0.42],
-    [0.40, 0.49], [0.60, 0.49]
-  ];
-  for (const [px, py] of pins) {
-    World.add(engine.world, Bodies.circle(W * px, H * py, 8, { isStatic: true, label: "pin" }));
-  }
-
-  // Row 2: jump or multiplier. Both are completely pass-through sensors.
-  addJumpPad(W * 0.25, H * 0.61, W * 0.38, 38, 8.5);
-  addGate(W * 0.75, H * 0.61, W * 0.38, 38, 5);
-
-  // Two tiny deflectors only; wide central opening to guarantee progression.
-  addStaticRect(W * 0.18, H * 0.75, W * 0.22, 10, 0.20);
-  addStaticRect(W * 0.82, H * 0.75, W * 0.22, 10, -0.20);
-
-  // Wide collector so balls cannot get stranded at the bottom.
-  const collector = addSensorRect(W / 2, H - 30, W - 46, 54, "collector");
-  collector.renderData = { x: W / 2, y: H - 30, w: W - 46, h: 54 };
-}
-
-function addGate(x, y, w, h, multiplier) {
-  const sensor = addSensorRect(x, y, w, h, "gate", { multiplier });
-  sensor.renderData = { x, y, w, h, multiplier };
-}
-
-function addJumpPad(x, y, w, h, power) {
-  const sensor = addSensorRect(x, y, w, h, "jump", { jumpPower: power });
-  sensor.renderData = { x, y, w, h, power };
-}
-
-function onCollision(event) {
-  for (const pair of event.pairs) {
-    const a = pair.bodyA, b = pair.bodyB;
-    const ball = a.label === "ball" ? a : b.label === "ball" ? b : null;
-    const other = ball === a ? b : a;
-    if (!ball) continue;
-
-    if (other.label === "gate") multiplyBall(ball, other.multiplier);
-
-    if (other.label === "jump") {
-      const now = performance.now();
-      if (!ball.plugin.jumpCooldown || now > ball.plugin.jumpCooldown) {
-        Body.setVelocity(ball, { x: ball.velocity.x, y: -Math.abs(other.jumpPower || 8.5) });
-        ball.plugin.jumpCooldown = now + 700;
-      }
-    }
-
-    if (other.label === "collector") {
-      collected++;
-      removeBall(ball);
-      collectedEl.textContent = collected;
-    }
-  }
-}
-
-function multiplyBall(ball, multiplier) {
-  const now = performance.now();
-  if (!ball.plugin) ball.plugin = {};
-  if (ball.plugin.gateCooldown && now < ball.plugin.gateCooldown) return;
-  const x = ball.position.x, y = ball.position.y;
-  const vx = ball.velocity.x, vy = Math.max(1.5, ball.velocity.y);
-  removeBall(ball);
-  const count = Math.min(multiplier, MAX_BALLS - balls.size);
-  for (let i = 0; i < count; i++) {
-    const spread = (i - (count - 1) / 2) * 4.5;
-    const b = createBall(x + spread, y + 10, vx + spread * 0.045, vy + Math.random() * 0.25);
-    if (b) b.plugin.gateCooldown = now + 350;
-  }
-}
-
-function setup() {
-  if (raf) cancelAnimationFrame(raf);
-  resizeCanvas(); launcherX = W / 2; draggingLauncher = false;
-  engine = Engine.create({ gravity: { x: 0, y: 1, scale: 0.00135 } });
-  balls = new Set(); collected = 0; dropped = false;
-  collectedEl.textContent = "0";
-  statusEl.textContent = "Drag balls left or right";
-  dropBtn.disabled = false; dropBtn.style.display = "block"; dropBtn.textContent = "DROP 5 BALLS";
-  createLevel(); Events.on(engine, "collisionStart", onCollision);
-  lastTime = performance.now(); loop(lastTime); updateHud();
-}
-
-function dropInitialBalls() {
-  if (dropped) return;
-  dropped = true; draggingLauncher = false; dropBtn.disabled = true; dropBtn.style.display = "none";
-  statusEl.textContent = "Running";
-  for (let i = 0; i < INITIAL_BALLS; i++) {
-    createBall(launcherX + (i - 2) * LAUNCH_SPACING, LAUNCH_Y, (i - 2) * 0.05, 0);
-  }
-}
-
-function updateHud() {
-  ballCountEl.textContent = dropped ? balls.size : INITIAL_BALLS;
-  if (dropped && balls.size === 0) statusEl.textContent = `Finished — ${collected} collected`;
-}
-
-function drawRoundedRect(x, y, w, h, r, fill) {
-  ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fillStyle = fill; ctx.fill();
-}
-
-function drawLauncher() {
-  if (dropped) return;
-  ctx.save(); ctx.setLineDash([5, 7]); ctx.strokeStyle = "rgba(255,255,255,.16)"; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(launcherX, LAUNCH_Y + 15); ctx.lineTo(launcherX, H * 0.25); ctx.stroke(); ctx.setLineDash([]);
-  for (let i = 0; i < INITIAL_BALLS; i++) {
-    const x = launcherX + (i - 2) * LAUNCH_SPACING;
-    ctx.beginPath(); ctx.arc(x, LAUNCH_Y, BALL_R, 0, Math.PI * 2); ctx.fillStyle = COLORS.ball; ctx.fill();
-    ctx.lineWidth = 2; ctx.strokeStyle = COLORS.outline; ctx.stroke();
-  }
-  ctx.fillStyle = "rgba(255,255,255,.62)"; ctx.font = "800 11px Arial"; ctx.textAlign = "center";
-  ctx.fillText("↔ DRAG TO AIM", launcherX, LAUNCH_Y + 31); ctx.restore();
-}
-
-function draw() {
-  const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, COLORS.bg1); g.addColorStop(1, COLORS.bg2);
-  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-
-  for (const body of engine.world.bodies) {
-    if (body.label === "ball") {
-      ctx.beginPath(); ctx.arc(body.position.x, body.position.y, BALL_R, 0, Math.PI * 2);
-      ctx.fillStyle = COLORS.ball; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = COLORS.outline; ctx.stroke(); continue;
-    }
-    if (body.label === "pin") {
-      ctx.beginPath(); ctx.arc(body.position.x, body.position.y, 8, 0, Math.PI * 2); ctx.fillStyle = COLORS.pin; ctx.fill(); continue;
-    }
-    if (body.label === "gate") {
-      const d = body.renderData;
-      const c = d.multiplier === 5 ? COLORS.gate5 : d.multiplier === 3 ? COLORS.gate3 : COLORS.gate2;
-      drawRoundedRect(d.x - d.w/2, d.y - d.h/2, d.w, d.h, 8, c);
-      ctx.fillStyle = COLORS.text; ctx.font = "900 28px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText("×" + d.multiplier, d.x, d.y + 1); continue;
-    }
-    if (body.label === "jump") {
-      const d = body.renderData; drawRoundedRect(d.x-d.w/2, d.y-d.h/2, d.w, d.h, 8, COLORS.jump);
-      ctx.fillStyle = COLORS.text; ctx.font = "900 28px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText("⇈", d.x, d.y); continue;
-    }
-    if (body.label === "collector") {
-      const d = body.renderData; drawRoundedRect(d.x-d.w/2, d.y-d.h/2, d.w, d.h, 10, COLORS.bucket);
-      ctx.fillStyle = "#b9c4df"; ctx.font = "800 14px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText("COLLECT", d.x, d.y); continue;
-    }
-    if (!body.isSensor) {
-      const v = body.vertices; ctx.beginPath(); ctx.moveTo(v[0].x,v[0].y);
-      for (let i=1;i<v.length;i++) ctx.lineTo(v[i].x,v[i].y);
-      ctx.closePath(); ctx.fillStyle = COLORS.wall; ctx.fill();
-    }
-  }
-  drawLauncher();
-}
-
-function cleanOutOfBounds() {
-  for (const ball of [...balls]) {
-    if (ball.position.y > H + 100 || ball.position.x < -100 || ball.position.x > W + 100) removeBall(ball);
-  }
-}
-
-function loop(now) {
-  const delta = Math.min(33, now-lastTime); lastTime = now; Engine.update(engine, delta); cleanOutOfBounds(); draw();
-  raf = requestAnimationFrame(loop);
-}
-
-canvas.addEventListener("pointerdown", e => {
-  if (dropped) return; draggingLauncher = true; launcherX = clampLauncherX(pointerX(e));
-  canvas.setPointerCapture?.(e.pointerId); e.preventDefault();
-});
-canvas.addEventListener("pointermove", e => {
-  if (dropped || !draggingLauncher) return; launcherX = clampLauncherX(pointerX(e)); e.preventDefault();
-});
-function stopDragging(e) { if (!draggingLauncher) return; draggingLauncher=false; canvas.releasePointerCapture?.(e.pointerId); }
-canvas.addEventListener("pointerup", stopDragging); canvas.addEventListener("pointercancel", stopDragging);
-dropBtn.addEventListener("click", dropInitialBalls); restartBtn.addEventListener("click", setup);
-window.addEventListener("resize", setup);
-setup();
+const canvas=document.getElementById('game'),wrap=document.getElementById('gameWrap'),dropBtn=document.getElementById('dropBtn'),restartBtn=document.getElementById('restartBtn'),ballCountEl=document.getElementById('ballCount'),collectedEl=document.getElementById('collected'),statusEl=document.getElementById('status');
+let engine,ctx,W=420,H=720,balls=new Set(),items=[],selected=null,collected=0,dropped=false,raf,lastTime=performance.now(),launcherX=210,drag=null;
+const R=7,N=5,MAX=500,LY=58,SP=18;
+const C={bg1:'#161e33',bg2:'#0a0e18',wall:'#4a536b',ball:'#fff',outline:'#111826',gate2:'#f4aa24',gate3:'#7a5cff',gate5:'#69b929',jump:'#24b8e7',bucket:'#222838',pin:'#78849f'};
+function resize(){const r=wrap.getBoundingClientRect(),d=Math.max(1,Math.min(2,devicePixelRatio||1));canvas.width=r.width*d;canvas.height=r.height*d;canvas.style.width=r.width+'px';canvas.style.height=r.height+'px';ctx=canvas.getContext('2d');ctx.setTransform(d,0,0,d,0,0);W=r.width;H=r.height;launcherX=Math.max(60,Math.min(W-60,launcherX||W/2));}
+function ball(x,y,vx=0,vy=0){if(balls.size>=MAX)return;const b=Bodies.circle(x,y,R,{restitution:.35,friction:.005,frictionAir:.0015,density:.0018,label:'ball'});b.plugin={gateCooldown:0,jumpCooldown:0};Body.setVelocity(b,{x:vx,y:vy});balls.add(b);World.add(engine.world,b);hud();}
+function removeBall(b){if(!balls.has(b))return;balls.delete(b);World.remove(engine.world,b);hud();}
+function makeBody(it){let b;if(it.type==='pin')b=Bodies.circle(it.x,it.y,it.r,{isStatic:true,label:'pin'});else if(it.type==='wall')b=Bodies.rectangle(it.x,it.y,it.w,it.h,{isStatic:true,angle:it.angle,label:'wall'});else b=Bodies.rectangle(it.x,it.y,it.w,it.h,{isStatic:true,isSensor:true,label:it.type==='collector'?'collector':it.type==='jump'?'jump':'gate'});b.editorItem=it;if(it.mult)b.multiplier=it.mult;if(it.type==='jump')b.jumpPower=9;it.body=b;World.add(engine.world,b);}
+function rebuild(it){if(it.body)World.remove(engine.world,it.body);makeBody(it);}
+function addItem(type,x=W/2,y=H/2){let it;if(type==='wall')it={type,x,y,w:130,h:12,angle:0};else if(type==='pin')it={type,x,y,r:10};else if(type==='jump')it={type,x,y,w:130,h:38};else if(type==='collector')it={type,x,y,w:180,h:45};else it={type:'gate',x,y,w:130,h:38,mult:+type};items.push(it);makeBody(it);selected=it;statusEl.textContent='DRAG TO MOVE';}
+function clearItems(){for(const it of items)if(it.body)World.remove(engine.world,it.body);items=[];selected=null;}
+function setup(){if(raf)cancelAnimationFrame(raf);resize();engine=Engine.create({gravity:{x:0,y:1,scale:.00135}});balls=new Set();collected=0;dropped=false;collectedEl.textContent='0';dropBtn.style.display='block';dropBtn.disabled=false;statusEl.textContent='EDIT MODE';launcherX=W/2;clearItems();Events.on(engine,'collisionStart',collide);lastTime=performance.now();loop(lastTime);hud();}
+function resetBalls(){for(const b of [...balls])removeBall(b);collected=0;collectedEl.textContent='0';dropped=false;dropBtn.style.display='block';dropBtn.disabled=false;statusEl.textContent='EDIT MODE';hud();}
+function dropBalls(){if(dropped)return;dropped=true;selected=null;dropBtn.style.display='none';statusEl.textContent='PLAYING';for(let i=0;i<N;i++)ball(launcherX+(i-2)*SP,LY,(i-2)*.05,0);}
+function collide(e){for(const p of e.pairs){const a=p.bodyA,b=p.bodyB,bl=a.label==='ball'?a:b.label==='ball'?b:null,o=bl===a?b:a;if(!bl)continue;if(o.label==='gate')multiply(bl,o.multiplier);if(o.label==='jump'){const n=performance.now();if(!bl.plugin.jumpCooldown||n>bl.plugin.jumpCooldown){Body.setVelocity(bl,{x:bl.velocity.x,y:-Math.abs(o.jumpPower||9)});bl.plugin.jumpCooldown=n+700;}}if(o.label==='collector'){collected++;removeBall(bl);collectedEl.textContent=collected;}}}
+function multiply(b,m){const n=performance.now();if(b.plugin.gateCooldown&&n<b.plugin.gateCooldown)return;const x=b.position.x,y=b.position.y,vx=b.velocity.x,vy=Math.max(1.5,b.velocity.y);removeBall(b);const count=Math.min(m,MAX-balls.size);for(let i=0;i<count;i++){const s=(i-(count-1)/2)*4.5,nb=ball(x+s,y+10,vx+s*.045,vy+Math.random()*.25);if(nb)nb.plugin.gateCooldown=n+350;}}
+function hud(){ballCountEl.textContent=dropped?balls.size:N;if(dropped&&balls.size===0)statusEl.textContent=`FINISHED ${collected}`;}
+function rr(x,y,w,h,r,c){ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fillStyle=c;ctx.fill();}
+function drawItem(it){ctx.save();if(it.type==='pin'){ctx.beginPath();ctx.arc(it.x,it.y,it.r,0,Math.PI*2);ctx.fillStyle=C.pin;ctx.fill();}else if(it.type==='wall'){ctx.translate(it.x,it.y);ctx.rotate(it.angle);ctx.fillStyle=C.wall;ctx.fillRect(-it.w/2,-it.h/2,it.w,it.h);}else{const col=it.type==='jump'?C.jump:it.type==='collector'?C.bucket:it.mult===5?C.gate5:it.mult===3?C.gate3:C.gate2;rr(it.x-it.w/2,it.y-it.h/2,it.w,it.h,8,col);ctx.fillStyle='#fff';ctx.font='900 24px Arial';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(it.type==='jump'?'⇈':it.type==='collector'?'COLLECT':'×'+it.mult,it.x,it.y);}if(selected===it&&!dropped){ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.setLineDash([5,4]);const w=it.type==='pin'?it.r*2+14:it.w+14,h=it.type==='pin'?it.r*2+14:it.h+14;ctx.strokeRect(it.x-w/2,it.y-h/2,w,h);}ctx.restore();}
+function draw(){const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,C.bg1);g.addColorStop(1,C.bg2);ctx.fillStyle=g;ctx.fillRect(0,0,W,H);ctx.strokeStyle='rgba(255,255,255,.08)';ctx.lineWidth=1;for(let x=20;x<W;x+=20){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke()}for(let y=20;y<H;y+=20){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke()}for(const it of items)drawItem(it);for(const b of balls){ctx.beginPath();ctx.arc(b.position.x,b.position.y,R,0,Math.PI*2);ctx.fillStyle=C.ball;ctx.fill();ctx.strokeStyle=C.outline;ctx.lineWidth=2;ctx.stroke();}if(!dropped){for(let i=0;i<N;i++){ctx.beginPath();ctx.arc(launcherX+(i-2)*SP,LY,R,0,Math.PI*2);ctx.fillStyle='#fff';ctx.fill();ctx.strokeStyle=C.outline;ctx.stroke()}ctx.fillStyle='rgba(255,255,255,.55)';ctx.font='800 10px Arial';ctx.textAlign='center';ctx.fillText('↔ DRAG BALLS',launcherX,LY+28);}}
+function loop(n){const d=Math.min(33,n-lastTime);lastTime=n;Engine.update(engine,d);for(const b of [...balls])if(b.position.y>H+100||b.position.x<-100||b.position.x>W+100)removeBall(b);draw();raf=requestAnimationFrame(loop);}
+function pos(e){const r=canvas.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};}
+function hit(x,y){for(let i=items.length-1;i>=0;i--){const it=items[i];if(it.type==='pin'){if(Math.hypot(x-it.x,y-it.y)<it.r+12)return it;}else if(Math.abs(x-it.x)<it.w/2+8&&Math.abs(y-it.y)<it.h/2+12)return it;}return null;}
+canvas.addEventListener('pointerdown',e=>{if(dropped)return;const p=pos(e),h=hit(p.x,p.y);if(h){selected=h;drag={kind:'item',dx:p.x-h.x,dy:p.y-h.y};}else if(p.y<120){selected=null;drag={kind:'launcher'};launcherX=Math.max(55,Math.min(W-55,p.x));}else selected=null;canvas.setPointerCapture?.(e.pointerId);e.preventDefault();});
+canvas.addEventListener('pointermove',e=>{if(dropped||!drag)return;const p=pos(e);if(drag.kind==='launcher')launcherX=Math.max(55,Math.min(W-55,p.x));else if(selected){selected.x=Math.max(15,Math.min(W-15,p.x-drag.dx));selected.y=Math.max(15,Math.min(H-15,p.y-drag.dy));rebuild(selected);}e.preventDefault();});
+canvas.addEventListener('pointerup',e=>{drag=null;canvas.releasePointerCapture?.(e.pointerId)});canvas.addEventListener('pointercancel',()=>drag=null);
+document.querySelectorAll('[data-add]').forEach(b=>b.addEventListener('click',()=>{if(!dropped)addItem(b.dataset.add)}));
+document.getElementById('rotateBtn').addEventListener('click',()=>{if(selected&&selected.type==='wall'&&!dropped){selected.angle+=Math.PI/12;rebuild(selected);}});
+document.getElementById('deleteBtn').addEventListener('click',()=>{if(selected&&!dropped){World.remove(engine.world,selected.body);items=items.filter(x=>x!==selected);selected=null;}});
+document.getElementById('clearBtn').addEventListener('click',()=>{if(!dropped){clearItems();statusEl.textContent='EMPTY';}});
+dropBtn.addEventListener('click',dropBalls);restartBtn.addEventListener('click',resetBalls);window.addEventListener('resize',()=>{resize();});setup();
