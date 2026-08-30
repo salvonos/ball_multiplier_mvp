@@ -6,7 +6,10 @@ public class Ball : MonoBehaviour
 {
     public Rigidbody2D Body { get; private set; }
 
-    private readonly HashSet<int> usedGateIds = new();
+    // A gate is blocked only temporarily. This prevents the freshly spawned
+    // clones from immediately multiplying again while they are still leaving
+    // the same trigger, but allows them to use that gate again later.
+    private readonly Dictionary<int, float> gateBlockedUntil = new();
 
     private void Awake()
     {
@@ -15,22 +18,34 @@ public class Ball : MonoBehaviour
 
     public bool CanUseGate(int gateId)
     {
-        return !usedGateIds.Contains(gateId);
+        if (!gateBlockedUntil.TryGetValue(gateId, out float blockedUntil))
+            return true;
+
+        if (Time.time >= blockedUntil)
+        {
+            gateBlockedUntil.Remove(gateId);
+            return true;
+        }
+
+        return false;
     }
 
-    public void MarkGateUsed(int gateId)
+    public void BlockGateTemporarily(int gateId, float seconds)
     {
-        usedGateIds.Add(gateId);
+        gateBlockedUntil[gateId] = Time.time + Mathf.Max(0f, seconds);
     }
 
-    public void CopyUsedGatesFrom(Ball source)
+    public void CopyGateCooldownsFrom(Ball source)
     {
-        usedGateIds.Clear();
+        gateBlockedUntil.Clear();
 
         if (source == null)
             return;
 
-        foreach (int gateId in source.usedGateIds)
-            usedGateIds.Add(gateId);
+        foreach (KeyValuePair<int, float> pair in source.gateBlockedUntil)
+        {
+            if (pair.Value > Time.time)
+                gateBlockedUntil[pair.Key] = pair.Value;
+        }
     }
 }
