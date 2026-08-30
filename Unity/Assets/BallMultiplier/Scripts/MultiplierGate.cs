@@ -14,12 +14,17 @@ public class MultiplierGate : MonoBehaviour
 
     private BoxCollider2D triggerCollider;
     private int gateId;
+    private static int nextGateId = 1;
 
     private void Awake()
     {
         triggerCollider = GetComponent<BoxCollider2D>();
         triggerCollider.isTrigger = true;
-        gateId = unchecked((int)GetEntityId());
+
+        // Do not use GetInstanceID/GetEntityId here.
+        // A simple runtime counter is enough to uniquely identify gates
+        // for the short immunity window used by Ball.
+        gateId = nextGateId++;
     }
 
     private void Reset()
