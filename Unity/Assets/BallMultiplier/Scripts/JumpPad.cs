@@ -8,12 +8,15 @@ public class JumpPad : MonoBehaviour
     [SerializeField] private float jumpVelocity = 12f;
 
     [Header("Behaviour")]
-    [Tooltip("A ball can use this specific Jump Pad only once.")]
+    [Tooltip("A ball can use this specific Jump Pad only once, but can still use other Jump Pads.")]
     [SerializeField] private bool oneUsePerBall = true;
 
     [Header("Collider")]
-    [Tooltip("Automatically matches the BoxCollider2D to the visible sprite.")]
+    [Tooltip("Automatically matches the trigger width to the sprite and gives it enough invisible thickness to catch fast balls.")]
     [SerializeField] private bool fitColliderToSprite = true;
+
+    [Tooltip("Minimum trigger thickness in world units. Prevents fast balls from tunnelling through thin/inclined pads.")]
+    [SerializeField] private float minimumWorldTriggerThickness = 1.0f;
 
     private BoxCollider2D triggerCollider;
     private readonly HashSet<Ball> usedBalls = new HashSet<Ball>();
@@ -46,6 +49,18 @@ public class JumpPad : MonoBehaviour
 
     private void OnTriggerEnter2D(Collider2D other)
     {
+        TryLaunch(other);
+    }
+
+    private void OnTriggerStay2D(Collider2D other)
+    {
+        // Extra safety for fast-moving balls that enter the trigger between
+        // physics steps. The one-use check prevents double activation.
+        TryLaunch(other);
+    }
+
+    private void TryLaunch(Collider2D other)
+    {
         Ball ball = other.GetComponent<Ball>();
         if (ball == null || ball.Body == null)
             return;
@@ -56,12 +71,9 @@ public class JumpPad : MonoBehaviour
         if (oneUsePerBall)
             usedBalls.Add(ball);
 
-        // The pad launches along its own local +Y axis.
-        // Rotating the JumpPad therefore rotates the launch direction too.
+        // Launch along this pad's local +Y axis.
+        // Therefore every Jump Pad has its own launch direction.
         Vector2 launchDirection = ((Vector2)transform.up).normalized;
-
-        // Replace the current velocity with a clean launch along the pad normal.
-        // This makes the behaviour consistent and physically aligned with the pad orientation.
         ball.Body.linearVelocity = launchDirection * Mathf.Abs(jumpVelocity);
     }
 
@@ -80,7 +92,15 @@ public class JumpPad : MonoBehaviour
             return;
 
         Bounds bounds = spriteRenderer.sprite.bounds;
-        box.size = bounds.size;
+
+        float worldScaleY = Mathf.Max(0.0001f, Mathf.Abs(transform.lossyScale.y));
+        float requiredLocalThickness = Mathf.Max(0f, minimumWorldTriggerThickness) / worldScaleY;
+
+        Vector2 size = bounds.size;
+        size.y = Mathf.Max(size.y, requiredLocalThickness);
+
+        box.size = size;
         box.offset = bounds.center;
+        box.isTrigger = true;
     }
 }
