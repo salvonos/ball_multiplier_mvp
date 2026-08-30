@@ -9,16 +9,12 @@ public class BallSpawner : MonoBehaviour
     [SerializeField] private int initialBallCount = 5;
     [SerializeField] private float ballGap = 0f;
 
-    [Header("Camera Anchoring")]
+    [Header("Placement")]
     [SerializeField] private Camera worldCamera;
-    [Range(0.01f, 0.25f)]
-    [SerializeField] private float topViewportPadding = 0.06f;
-    [Range(0.01f, 0.25f)]
-    [SerializeField] private float sideViewportPadding = 0.03f;
-
-    [Header("Drag")]
-    [SerializeField] private float clickVerticalToleranceAtSize9 = 0.45f;
-    [SerializeField] private float clickHorizontalPaddingAtSize9 = 0.25f;
+    [Tooltip("Keep the spawned row inside the visible horizontal camera bounds.")]
+    [SerializeField] private bool clampToCamera = true;
+    [Range(0f, 0.2f)]
+    [SerializeField] private float sideViewportPadding = 0.02f;
 
     [Header("Launcher Guide")]
     [SerializeField] private Color guideColor = Color.white;
@@ -29,6 +25,7 @@ public class BallSpawner : MonoBehaviour
     private bool dragging;
     private bool readyToDrop = true;
     private readonly List<Ball> spawnedBalls = new List<Ball>();
+
     private LineRenderer guideLine;
     private Material guideMaterial;
 
@@ -39,12 +36,7 @@ public class BallSpawner : MonoBehaviour
     {
         ResolveCamera();
         CreateGuideLine();
-        ForceAnchorNow();
-    }
-
-    private void Start()
-    {
-        ForceAnchorNow();
+        UpdateGuideLine();
     }
 
     private void OnEnable()
@@ -62,11 +54,6 @@ public class BallSpawner : MonoBehaviour
     {
         ResolveCamera();
 
-        // IMPORTANT: always keep the transform anchored to the camera,
-        // even while Play mode hides the guide. This means changing the
-        // camera zoom can never leave the launcher at its old world Y.
-        SnapToCameraTop();
-
         bool editMode = GameModeController.Instance == null ||
                         GameModeController.Instance.Mode == GameMode.Edit;
 
@@ -82,23 +69,10 @@ public class BallSpawner : MonoBehaviour
         HandlePointer();
     }
 
-    private void LateUpdate()
-    {
-        // Re-apply after all camera scripts have updated this frame.
-        SnapToCameraTop();
-    }
-
     private void ResolveCamera()
     {
         if (worldCamera == null)
             worldCamera = Camera.main;
-    }
-
-    private void ForceAnchorNow()
-    {
-        SnapToCameraTop();
-        UpdateGuideLine();
-        SetGuideVisible(readyToDrop);
     }
 
     private float ZoomScale()
@@ -109,28 +83,6 @@ public class BallSpawner : MonoBehaviour
         return worldCamera.orthographicSize / Mathf.Max(0.01f, referenceOrthographicSize);
     }
 
-    private void SnapToCameraTop()
-    {
-        if (worldCamera == null || !worldCamera.orthographic)
-            return;
-
-        float halfHeight = worldCamera.orthographicSize;
-        float halfWidth = halfHeight * worldCamera.aspect;
-
-        // Viewport based vertical anchor: 0.06 means 6% below screen top.
-        float verticalInset = halfHeight * 2f * Mathf.Clamp(topViewportPadding, 0.01f, 0.25f);
-        float targetY = worldCamera.transform.position.y + halfHeight - verticalInset;
-
-        float occupiedHalfWidth = GetOccupiedHalfWidth();
-        float horizontalInset = halfWidth * 2f * Mathf.Clamp(sideViewportPadding, 0.01f, 0.25f);
-        float allowedHalfWidth = Mathf.Max(0f, halfWidth - horizontalInset - occupiedHalfWidth);
-
-        float centerX = worldCamera.transform.position.x;
-        float targetX = Mathf.Clamp(transform.position.x, centerX - allowedHalfWidth, centerX + allowedHalfWidth);
-
-        transform.position = new Vector3(targetX, targetY, 0f);
-    }
-
     private void HandlePointer()
     {
         if (Pointer.current == null || worldCamera == null)
@@ -139,23 +91,19 @@ public class BallSpawner : MonoBehaviour
         Vector2 screenPosition = Pointer.current.position.ReadValue();
         Vector3 worldPosition = ScreenToWorld(screenPosition);
 
-        if (Pointer.current.press.wasPressedThisFrame && PointerHitsGuide(worldPosition))
+        // Entire Game window is the drag area. No need to click the guide itself.
+        if (Pointer.current.press.wasPressedThisFrame)
             dragging = true;
 
         if (dragging && Pointer.current.press.isPressed)
         {
-            float halfWidth = worldCamera.orthographicSize * worldCamera.aspect;
-            float occupiedHalfWidth = GetOccupiedHalfWidth();
-            float horizontalInset = halfWidth * 2f * Mathf.Clamp(sideViewportPadding, 0.01f, 0.25f);
-            float allowedHalfWidth = Mathf.Max(0f, halfWidth - horizontalInset - occupiedHalfWidth);
-            float centerX = worldCamera.transform.position.x;
+            float targetX = worldPosition.x;
 
-            transform.position = new Vector3(
-                Mathf.Clamp(worldPosition.x, centerX - allowedHalfWidth, centerX + allowedHalfWidth),
-                transform.position.y,
-                0f
-            );
+            if (clampToCamera && worldCamera.orthographic)
+                targetX = ClampXToCamera(targetX);
 
+            // Only X changes during gameplay drag. Y is defined by the prefab/scene placement.
+            transform.position = new Vector3(targetX, transform.position.y, transform.position.z);
             UpdateGuideLine();
         }
 
@@ -166,24 +114,29 @@ public class BallSpawner : MonoBehaviour
         }
     }
 
-    private Vector3 ScreenToWorld(Vector2 screenPosition)
+    private float ClampXToCamera(float x)
     {
-        float distance = Mathf.Abs(worldCamera.transform.position.z);
-        Vector3 worldPosition = worldCamera.ScreenToWorldPoint(new Vector3(screenPosition.x, screenPosition.y, distance));
-        worldPosition.z = 0f;
-        return worldPosition;
+        float halfCameraWidth = worldCamera.orthographicSize * worldCamera.aspect;
+        float cameraCenterX = worldCamera.transform.position.x;
+        float occupiedHalfWidth = GetOccupiedHalfWidth();
+        float sidePaddingWorld = halfCameraWidth * 2f * Mathf.Clamp(sideViewportPadding, 0f, 0.2f);
+        float allowedHalfWidth = Mathf.Max(0f, halfCameraWidth - sidePaddingWorld - occupiedHalfWidth);
+
+        return Mathf.Clamp(
+            x,
+            cameraCenterX - allowedHalfWidth,
+            cameraCenterX + allowedHalfWidth
+        );
     }
 
-    private bool PointerHitsGuide(Vector3 worldPosition)
+    private Vector3 ScreenToWorld(Vector2 screenPosition)
     {
-        float zoom = ZoomScale();
-        float halfWidth = GetOccupiedHalfWidth();
-        float verticalTolerance = clickVerticalToleranceAtSize9 * zoom;
-        float horizontalPadding = clickHorizontalPaddingAtSize9 * zoom;
-
-        return Mathf.Abs(worldPosition.y - transform.position.y) <= verticalTolerance &&
-               worldPosition.x >= transform.position.x - halfWidth - horizontalPadding &&
-               worldPosition.x <= transform.position.x + halfWidth + horizontalPadding;
+        float distance = Mathf.Abs(worldCamera.transform.position.z - transform.position.z);
+        Vector3 worldPosition = worldCamera.ScreenToWorldPoint(
+            new Vector3(screenPosition.x, screenPosition.y, distance)
+        );
+        worldPosition.z = transform.position.z;
+        return worldPosition;
     }
 
     private float GetBallVisualRadius()
@@ -286,7 +239,11 @@ public class BallSpawner : MonoBehaviour
         for (int i = 0; i < initialBallCount; i++)
         {
             float offset = (i - (initialBallCount - 1) * 0.5f) * spacing;
-            Ball newBall = Instantiate(ballPrefab, new Vector3(transform.position.x + offset, spawnY, 0f), Quaternion.identity);
+            Ball newBall = Instantiate(
+                ballPrefab,
+                new Vector3(transform.position.x + offset, spawnY, transform.position.z),
+                Quaternion.identity
+            );
             spawnedBalls.Add(newBall);
         }
     }
@@ -296,7 +253,8 @@ public class BallSpawner : MonoBehaviour
         ClearBalls();
         readyToDrop = true;
         dragging = false;
-        ForceAnchorNow();
+        SetGuideVisible(true);
+        UpdateGuideLine();
     }
 
     public void ClearBalls()
