@@ -23,8 +23,9 @@ public class GameModeController : MonoBehaviour
     public void EnterEditMode()
     {
         mode = GameMode.Edit;
+
         if (spawner != null)
-            spawner.ClearBalls();
+            spawner.ResetForEdit();
     }
 
     public void EnterPlayMode()
@@ -35,15 +36,16 @@ public class GameModeController : MonoBehaviour
     public void DropBalls()
     {
         mode = GameMode.Play;
+
         if (spawner != null)
             spawner.DropBalls();
     }
 
     public void ResetBalls()
     {
-        if (spawner != null)
-            spawner.ClearBalls();
-
         mode = GameMode.Edit;
+
+        if (spawner != null)
+            spawner.ResetForEdit();
     }
 }
