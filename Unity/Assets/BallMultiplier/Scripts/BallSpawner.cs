@@ -11,19 +11,22 @@ public class BallSpawner : MonoBehaviour
 
     [Header("Camera Anchoring")]
     [SerializeField] private Camera worldCamera;
-    [Tooltip("Distance from the visible top edge of the camera.")]
-    [SerializeField] private float topMargin = 0.8f;
-    [Tooltip("Distance from the visible left/right edges of the camera.")]
-    [SerializeField] private float sideMargin = 0.35f;
+    [Range(0.01f, 0.25f)]
+    [Tooltip("Screen-space distance from the top edge. 0.06 = 6% below the top.")]
+    [SerializeField] private float topViewportPadding = 0.06f;
+    [Range(0.01f, 0.25f)]
+    [Tooltip("Screen-space distance from the left/right edges.")]
+    [SerializeField] private float sideViewportPadding = 0.03f;
 
     [Header("Drag")]
-    [SerializeField] private float clickVerticalTolerance = 0.45f;
-    [SerializeField] private float clickHorizontalPadding = 0.25f;
+    [SerializeField] private float clickVerticalToleranceAtSize9 = 0.45f;
+    [SerializeField] private float clickHorizontalPaddingAtSize9 = 0.25f;
 
     [Header("Launcher Guide")]
     [SerializeField] private Color guideColor = Color.white;
-    [SerializeField] private float guideWidth = 0.045f;
-    [SerializeField] private float endCapHeight = 0.20f;
+    [SerializeField] private float guideWidthAtSize9 = 0.045f;
+    [SerializeField] private float endCapHeightAtSize9 = 0.20f;
+    [SerializeField] private float referenceOrthographicSize = 9f;
 
     private bool dragging;
     private bool readyToDrop = true;
@@ -63,13 +66,26 @@ public class BallSpawner : MonoBehaviour
             return;
         }
 
-        // Keep the launcher attached to the visible top edge even if
-        // Orthographic Size, aspect ratio or camera position changes.
         SnapToCameraTop();
-
         SetGuideVisible(true);
         UpdateGuideLine();
         HandlePointer();
+    }
+
+    private float ZoomScale()
+    {
+        if (worldCamera == null || !worldCamera.orthographic)
+            return 1f;
+
+        return worldCamera.orthographicSize / Mathf.Max(0.01f, referenceOrthographicSize);
+    }
+
+    private Vector3 ViewportToWorld(float x, float y)
+    {
+        float distance = Mathf.Abs(worldCamera.transform.position.z);
+        Vector3 world = worldCamera.ViewportToWorldPoint(new Vector3(x, y, distance));
+        world.z = 0f;
+        return world;
     }
 
     private void SnapToCameraTop()
@@ -77,20 +93,18 @@ public class BallSpawner : MonoBehaviour
         if (worldCamera == null || !worldCamera.orthographic)
             return;
 
-        float cameraTop = worldCamera.transform.position.y + worldCamera.orthographicSize;
-        float targetY = cameraTop - Mathf.Max(0f, topMargin);
+        float viewportY = 1f - Mathf.Clamp(topViewportPadding, 0.01f, 0.25f);
+        float targetY = ViewportToWorld(0.5f, viewportY).y;
 
-        float halfCameraWidth = worldCamera.orthographicSize * worldCamera.aspect;
         float occupiedHalfWidth = GetOccupiedHalfWidth();
-        float horizontalLimit = Mathf.Max(
-            0f,
-            halfCameraWidth - occupiedHalfWidth - Mathf.Max(0f, sideMargin)
-        );
+        float leftWorld = ViewportToWorld(Mathf.Clamp(sideViewportPadding, 0.01f, 0.25f), 0.5f).x;
+        float rightWorld = ViewportToWorld(1f - Mathf.Clamp(sideViewportPadding, 0.01f, 0.25f), 0.5f).x;
 
-        float cameraCenterX = worldCamera.transform.position.x;
-        float minX = cameraCenterX - horizontalLimit;
-        float maxX = cameraCenterX + horizontalLimit;
-        float clampedX = Mathf.Clamp(transform.position.x, minX, maxX);
+        float minX = leftWorld + occupiedHalfWidth;
+        float maxX = rightWorld - occupiedHalfWidth;
+        float clampedX = minX <= maxX
+            ? Mathf.Clamp(transform.position.x, minX, maxX)
+            : worldCamera.transform.position.x;
 
         transform.position = new Vector3(clampedX, targetY, 0f);
     }
@@ -108,23 +122,17 @@ public class BallSpawner : MonoBehaviour
 
         if (dragging && Pointer.current.press.isPressed)
         {
-            float halfCameraWidth = worldCamera.orthographicSize * worldCamera.aspect;
             float occupiedHalfWidth = GetOccupiedHalfWidth();
-            float horizontalLimit = Mathf.Max(
-                0f,
-                halfCameraWidth - occupiedHalfWidth - Mathf.Max(0f, sideMargin)
-            );
+            float leftWorld = ViewportToWorld(Mathf.Clamp(sideViewportPadding, 0.01f, 0.25f), 0.5f).x;
+            float rightWorld = ViewportToWorld(1f - Mathf.Clamp(sideViewportPadding, 0.01f, 0.25f), 0.5f).x;
+            float minX = leftWorld + occupiedHalfWidth;
+            float maxX = rightWorld - occupiedHalfWidth;
 
-            float cameraCenterX = worldCamera.transform.position.x;
-            float minX = cameraCenterX - horizontalLimit;
-            float maxX = cameraCenterX + horizontalLimit;
+            float x = minX <= maxX
+                ? Mathf.Clamp(worldPosition.x, minX, maxX)
+                : worldCamera.transform.position.x;
 
-            transform.position = new Vector3(
-                Mathf.Clamp(worldPosition.x, minX, maxX),
-                transform.position.y,
-                0f
-            );
-
+            transform.position = new Vector3(x, transform.position.y, 0f);
             UpdateGuideLine();
         }
 
@@ -148,11 +156,14 @@ public class BallSpawner : MonoBehaviour
 
     private bool PointerHitsGuide(Vector3 worldPosition)
     {
+        float zoom = ZoomScale();
         float halfWidth = GetOccupiedHalfWidth();
+        float verticalTolerance = clickVerticalToleranceAtSize9 * zoom;
+        float horizontalPadding = clickHorizontalPaddingAtSize9 * zoom;
 
-        bool insideY = Mathf.Abs(worldPosition.y - transform.position.y) <= clickVerticalTolerance;
-        bool insideX = worldPosition.x >= transform.position.x - halfWidth - clickHorizontalPadding &&
-                       worldPosition.x <= transform.position.x + halfWidth + clickHorizontalPadding;
+        bool insideY = Mathf.Abs(worldPosition.y - transform.position.y) <= verticalTolerance;
+        bool insideX = worldPosition.x >= transform.position.x - halfWidth - horizontalPadding &&
+                       worldPosition.x <= transform.position.x + halfWidth + horizontalPadding;
 
         return insideX && insideY;
     }
@@ -201,8 +212,6 @@ public class BallSpawner : MonoBehaviour
         guideLine.useWorldSpace = false;
         guideLine.loop = false;
         guideLine.positionCount = 4;
-        guideLine.startWidth = guideWidth;
-        guideLine.endWidth = guideWidth;
         guideLine.startColor = guideColor;
         guideLine.endColor = guideColor;
         guideLine.numCapVertices = 4;
@@ -222,8 +231,10 @@ public class BallSpawner : MonoBehaviour
         if (guideLine == null)
             return;
 
+        float zoom = ZoomScale();
         float halfWidth = GetOccupiedHalfWidth();
-        float halfCap = endCapHeight * 0.5f;
+        float guideWidth = guideWidthAtSize9 * zoom;
+        float halfCap = endCapHeightAtSize9 * zoom * 0.5f;
 
         guideLine.startWidth = guideWidth;
         guideLine.endWidth = guideWidth;
