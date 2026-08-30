@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>Ball Multiplier MVP</title>
-  <link rel="stylesheet" href="style.css?v=014" />
+  <title>Ball Multiplier Editor</title>
+  <link rel="stylesheet" href="style.css?v=020" />
   <script src="https://cdn.jsdelivr.net/npm/matter-js@0.20.0/build/matter.min.js"></script>
 </head>
 <body>
@@ -12,15 +12,33 @@
     <div class="hud">
       <div><div class="label">BALLS</div><div id="ballCount" class="value">5</div></div>
       <div class="title">MULTIPLY</div>
-      <button id="restartBtn">RESTART</button>
+      <button id="restartBtn">RESET BALLS</button>
     </div>
-    <div id="gameWrap"><canvas id="game"></canvas><button id="dropBtn">DROP 5 BALLS</button></div>
+
+    <div id="gameWrap">
+      <canvas id="game"></canvas>
+      <button id="dropBtn">DROP 5 BALLS</button>
+    </div>
+
+    <div id="editorBar">
+      <button data-add="wall">+ WALL</button>
+      <button data-add="pin">+ PIN</button>
+      <button data-add="2">+ ×2</button>
+      <button data-add="3">+ ×3</button>
+      <button data-add="5">+ ×5</button>
+      <button data-add="jump">+ JUMP</button>
+      <button data-add="collector">+ COLLECT</button>
+      <button id="rotateBtn">ROTATE</button>
+      <button id="deleteBtn">DELETE</button>
+      <button id="clearBtn">CLEAR</button>
+    </div>
+
     <div class="footer">
       <div>Collected: <strong id="collected">0</strong></div>
-      <div id="version">v0.1.4</div>
-      <div id="status">Ready</div>
+      <div id="version">v0.2.0</div>
+      <div id="status">EDIT MODE</div>
     </div>
   </div>
-  <script src="game.js?v=014"></script>
+  <script src="game.js?v=020"></script>
 </body>
 </html>
