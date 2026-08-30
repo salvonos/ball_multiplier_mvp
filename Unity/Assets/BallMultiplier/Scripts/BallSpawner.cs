@@ -7,7 +7,8 @@ public class BallSpawner : MonoBehaviour
     [Header("Spawn")]
     [SerializeField] private Ball ballPrefab;
     [SerializeField] private int initialBallCount = 5;
-    [SerializeField] private float spacing = 0.35f;
+    [Tooltip("Extra gap between balls. 0 = balls touch exactly.")]
+    [SerializeField] private float ballGap = 0.02f;
 
     [Header("Horizontal Drag")]
     [SerializeField] private Camera worldCamera;
@@ -71,11 +72,8 @@ public class BallSpawner : MonoBehaviour
         Vector2 screenPosition = Pointer.current.position.ReadValue();
         Vector3 world = ScreenToWorld(screenPosition);
 
-        if (Pointer.current.press.wasPressedThisFrame)
-        {
-            if (PointerHitsGuide(world))
-                dragging = true;
-        }
+        if (Pointer.current.press.wasPressedThisFrame && PointerHitsGuide(world))
+            dragging = true;
 
         if (dragging && Pointer.current.press.isPressed)
         {
@@ -118,19 +116,33 @@ public class BallSpawner : MonoBehaviour
                worldPosition.x <= transform.position.x + halfWidth + clickHorizontalPadding;
     }
 
+    private float GetBallRadius()
+    {
+        if (ballPrefab == null)
+            return 0.125f;
+
+        CircleCollider2D circle = ballPrefab.GetComponent<CircleCollider2D>();
+        if (circle != null)
+            return circle.radius * Mathf.Abs(ballPrefab.transform.localScale.x);
+
+        SpriteRenderer sprite = ballPrefab.GetComponent<SpriteRenderer>();
+        if (sprite != null && sprite.sprite != null)
+            return sprite.sprite.bounds.extents.x * Mathf.Abs(ballPrefab.transform.localScale.x);
+
+        return 0.125f;
+    }
+
+    private float GetCenterSpacing()
+    {
+        return GetBallRadius() * 2f + Mathf.Max(0f, ballGap);
+    }
+
     private float GetOccupiedHalfWidth()
     {
-        float ballRadius = 0.125f;
-
-        if (ballPrefab != null)
-        {
-            CircleCollider2D circle = ballPrefab.GetComponent<CircleCollider2D>();
-            if (circle != null)
-                ballRadius = circle.radius * Mathf.Abs(ballPrefab.transform.localScale.x);
-        }
-
-        float centersWidth = Mathf.Max(0, initialBallCount - 1) * spacing;
-        return centersWidth * 0.5f + ballRadius;
+        float radius = GetBallRadius();
+        float centerSpacing = GetCenterSpacing();
+        float centersWidth = Mathf.Max(0, initialBallCount - 1) * centerSpacing;
+        return centersWidth * 0.5f + radius;
     }
 
     private void CreateGuideLine()
@@ -171,7 +183,7 @@ public class BallSpawner : MonoBehaviour
         guideLine.startColor = guideColor;
         guideLine.endColor = guideColor;
 
-        // A simple bracket: |---------|
+        // The horizontal line is the exact top edge of the ball row.
         guideLine.SetPosition(0, new Vector3(-halfWidth, halfCap, 0f));
         guideLine.SetPosition(1, new Vector3(-halfWidth, 0f, 0f));
         guideLine.SetPosition(2, new Vector3(halfWidth, 0f, 0f));
@@ -199,14 +211,20 @@ public class BallSpawner : MonoBehaviour
     {
         ClearBalls();
 
+        float radius = GetBallRadius();
+        float centerSpacing = GetCenterSpacing();
+
+        // Balls start immediately BELOW the guide, so visually they fall from the line.
+        float spawnY = transform.position.y - radius - guideWidth * 0.5f;
+
         for (int i = 0; i < initialBallCount; i++)
         {
             float offset =
-                (i - (initialBallCount - 1) * 0.5f) * spacing;
+                (i - (initialBallCount - 1) * 0.5f) * centerSpacing;
 
             Ball ball = Instantiate(
                 ballPrefab,
-                transform.position + Vector3.right * offset,
+                new Vector3(transform.position.x + offset, spawnY, 0f),
                 Quaternion.identity
             );
 
