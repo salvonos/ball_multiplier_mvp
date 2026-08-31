@@ -12,19 +12,16 @@ public class JumpPad : MonoBehaviour
     [SerializeField] private bool oneUsePerBall = true;
 
     [Header("Collider")]
-    [Tooltip("Automatically matches the trigger width to the sprite and gives it enough invisible thickness to catch fast balls.")]
+    [Tooltip("Automatically matches the solid collider to the visible sprite.")]
     [SerializeField] private bool fitColliderToSprite = true;
 
-    [Tooltip("Minimum trigger thickness in world units. Prevents fast balls from tunnelling through thin/inclined pads.")]
-    [SerializeField] private float minimumWorldTriggerThickness = 1.0f;
-
-    private BoxCollider2D triggerCollider;
+    private BoxCollider2D solidCollider;
     private readonly HashSet<Ball> usedBalls = new HashSet<Ball>();
 
     private void Awake()
     {
-        triggerCollider = GetComponent<BoxCollider2D>();
-        triggerCollider.isTrigger = true;
+        solidCollider = GetComponent<BoxCollider2D>();
+        solidCollider.isTrigger = false;
 
         if (fitColliderToSprite)
             FitColliderToSprite();
@@ -32,31 +29,26 @@ public class JumpPad : MonoBehaviour
 
     private void Reset()
     {
-        triggerCollider = GetComponent<BoxCollider2D>();
-        triggerCollider.isTrigger = true;
+        solidCollider = GetComponent<BoxCollider2D>();
+        solidCollider.isTrigger = false;
         FitColliderToSprite();
     }
 
     private void OnValidate()
     {
-        if (!fitColliderToSprite)
+        BoxCollider2D box = GetComponent<BoxCollider2D>();
+        if (box == null)
             return;
 
-        BoxCollider2D box = GetComponent<BoxCollider2D>();
-        if (box != null)
+        box.isTrigger = false;
+
+        if (fitColliderToSprite)
             FitColliderToSprite(box);
     }
 
-    private void OnTriggerEnter2D(Collider2D other)
+    private void OnCollisionEnter2D(Collision2D collision)
     {
-        TryLaunch(other);
-    }
-
-    private void OnTriggerStay2D(Collider2D other)
-    {
-        // Extra safety for fast-moving balls that enter the trigger between
-        // physics steps. The one-use check prevents double activation.
-        TryLaunch(other);
+        TryLaunch(collision.collider);
     }
 
     private void TryLaunch(Collider2D other)
@@ -71,18 +63,18 @@ public class JumpPad : MonoBehaviour
         if (oneUsePerBall)
             usedBalls.Add(ball);
 
-        // Launch along this pad's local +Y axis.
-        // Therefore every Jump Pad has its own launch direction.
+        // Real physical surface: the ball first collides with the pad,
+        // then receives a launch impulse along the pad's local normal.
         Vector2 launchDirection = ((Vector2)transform.up).normalized;
         ball.Body.linearVelocity = launchDirection * Mathf.Abs(jumpVelocity);
     }
 
     private void FitColliderToSprite()
     {
-        if (triggerCollider == null)
-            triggerCollider = GetComponent<BoxCollider2D>();
+        if (solidCollider == null)
+            solidCollider = GetComponent<BoxCollider2D>();
 
-        FitColliderToSprite(triggerCollider);
+        FitColliderToSprite(solidCollider);
     }
 
     private void FitColliderToSprite(BoxCollider2D box)
@@ -92,15 +84,8 @@ public class JumpPad : MonoBehaviour
             return;
 
         Bounds bounds = spriteRenderer.sprite.bounds;
-
-        float worldScaleY = Mathf.Max(0.0001f, Mathf.Abs(transform.lossyScale.y));
-        float requiredLocalThickness = Mathf.Max(0f, minimumWorldTriggerThickness) / worldScaleY;
-
-        Vector2 size = bounds.size;
-        size.y = Mathf.Max(size.y, requiredLocalThickness);
-
-        box.size = size;
+        box.size = bounds.size;
         box.offset = bounds.center;
-        box.isTrigger = true;
+        box.isTrigger = false;
     }
 }
